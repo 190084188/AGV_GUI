@@ -1,10 +1,10 @@
 import struct
+import time
 from pyModbusTCP.client import ModbusClient
 
 
 class AGVController:
     def __init__(self):
-        self.connected = None
         self.client = None
         self.AGV_vw_set = None
         self.AGV_vy_set = None
@@ -28,13 +28,9 @@ class AGVController:
         self.AGV_emergencystop = None
         self.AGV_movingstop = None
 
-    def init(self, ip, port):
-        self.client = ModbusClient(host=ip, port=port, timeout=1, auto_open=True)
-        if self.client.open():
-            self.readonly_status()
-            self.connected = 1
-        else:
-            self.connected = 0
+    def modbus_init(self, ip, port):
+        self.client = ModbusClient(host=ip, port=port, auto_open=True)
+        self.readonly_status()
 
     def read_holding_registers(self, address, count):
         try:
@@ -43,7 +39,21 @@ class AGVController:
             print(f"Error reading holding registers: {e}")
             return None
 
-    def read_float32(self, address):
+    def read_discrete_inputs(self, address, count):
+        try:
+            return self.client.read_discrete_inputs(address, count)
+        except Exception as e:
+            print(f"Error reading holding registers: {e}")
+            return None
+
+    def read_input_registers(self, address, count):
+        try:
+            return self.client.read_input_registers(address, count)
+        except Exception as e:
+            print(f"Error reading input registers: {e}")
+            return None
+
+    def read_holding_float32(self, address):
         # 从指定地址读取两个连续的寄存器
         registers = self.client.read_holding_registers(address, 2)
         # 合并寄存器值为32位整数
@@ -52,6 +62,19 @@ class AGVController:
         raw_value = registers[0] + (registers[1] << 16)
         # 将32位整数解码为浮点数
         float_value = struct.unpack('f', struct.pack('I', raw_value))[0]
+        float_value = "{:.4f}".format(float_value)
+        return float_value
+
+    def read_input_float32(self, address):
+        # 从指定地址读取两个连续的寄存器
+        registers = self.client.read_input_registers(address, 2)
+        # 合并寄存器值为32位整数
+        # 适用于小端格式的设备（低地址寄存器在前）
+        # 对于大端格式的设备，调整 registers[0] 和 registers[1] 的顺序
+        raw_value = registers[0] + (registers[1] << 16)
+        # 将32位整数解码为浮点数
+        float_value = struct.unpack('f', struct.pack('I', raw_value))[0]
+        float_value = "{:.4f}".format(float_value)
         return float_value
 
     def write_float32(self, address, float_value):
@@ -70,42 +93,45 @@ class AGVController:
             return False
 
     def readonly_status(self):
-        # self.AGV_movingstop = self.read_holding_registers(10009, 1)[0]
-        self.AGV_emergencystop = self.read_holding_registers(10010, 1)[0]
-        self.AGV_vx = self.read_float32(30001)
-        self.AGV_vy = self.read_float32(30003)
-        self.AGV_vw = self.read_float32(30005)
-        self.AGV_posx = self.read_float32(30007)
-        self.AGV_posy = self.read_float32(30009)
-        self.AGV_theta = self.read_float32(30011)
-        # self.AGV_presentnavigationpoint = self.read_holding_registers(30013, 1)[0]
-        # self.AGV_stopreason = self.read_holding_registers(30014, 1)[0]
-        self.AGV_movingstatus = self.read_holding_registers(30015, 1)[0]
-        self.AGV_battery = self.read_holding_registers(30016, 1)[0]
-        # self.AGV_safelidarstatus = self.read_holding_registers(30017, 1)[0]
-        self.AGV_mannualorauto = self.read_holding_registers(30019, 1)[0]
-        # self.AGV_fsafelidarareastatus = self.read_holding_registers(30020, 1)[0]
-        # self.AGV_bsafelidarareastatus = self.read_holding_registers(30021, 1)[0]
-        # self.AGV_fpointcloudlidarareastatus = self.read_holding_registers(30032, 1)[0]
-        # self.AGV_bpointcloudlidarareastatus = self.read_holding_registers(30033, 1)[0]
+        # self.AGV_movingstop = self.read_input_registers(8, 1)[0]
+        # self.AGV_emergencystop = self.read_input_registers(9, 1)[0]
+        self.AGV_vx = self.read_input_float32(0)
+        self.AGV_vy = self.read_input_float32(2)
+        self.AGV_vw = self.read_input_float32(4)
+        self.AGV_posx = self.read_input_float32(6)
+        self.AGV_posy = self.read_input_float32(8)
+        self.AGV_theta = self.read_input_float32(10)
+        # self.AGV_presentnavigationpoint = self.read_input_registers(12, 1)[0]
+        # self.AGV_stopreason = self.read_input_registers(13, 1)[0]
+        self.AGV_movingstatus = self.read_input_registers(14, 1)[0]
+        self.AGV_battery = self.read_input_registers(15, 1)[0]
+        # self.AGV_safelidarstatus = self.read_input_registers(16, 1)[0]
+        self.AGV_mannualorauto = self.read_input_registers(18, 1)[0]
+        # self.AGV_fsafelidarareastatus = self.read_input_registers(19, 1)[0]
+        # self.AGV_bsafelidarareastatus = self.read_input_registers(20, 1)[0]
+        # self.AGV_fpointcloudlidarareastatus = self.read_input_registers(31, 1)[0]
+        # self.AGV_bpointcloudlidarareastatus = self.read_input_registers(32, 1)[0]
 
     def change_vx(self, value):
-        self.write_float32(40001, value)
+        self.write_float32(0, value)
         self.AGV_vx_set = value
 
     def change_vy(self, value):
-        self.write_float32(40003, value)
+        self.write_float32(2, value)
         self.AGV_vy_set = value
 
     def change_vw(self, value):
-        self.write_float32(40005, value)
+        self.write_float32(4, value)
         self.AGV_vw_set = value
 
-    # def heartbeat(self):
-    #     try:
-    #         current_value = self.client.read_holding_registers(40010, 1)[0]
-    #         new_value = 0 if current_value != 0 else 1
-    #         self.client.write_single_register(40010, new_value)
-    #     except Exception as e:
-    #         print(f"Error updating open loop control: {e}")
-    #     self.client.write_single_register(40010, 1)
+
+if __name__ == "__main__":
+    modbus = AGVController()
+    modbus.modbus_init('192.168.2.2', 3001)
+    modbus.change_vx(-0.1)
+    modbus.change_vw(0.1)
+    while True:
+        current_value = modbus.read_holding_registers(9, 1)[0]
+        new_value = 1 if current_value != 1 else 2
+        modbus.write_holding_register(9, new_value)
+        time.sleep(0.1)

@@ -1,18 +1,21 @@
 import sys
-
 from PyQt5.QtCore import QTimer
 from PyQt5.QtWidgets import QApplication, QMainWindow
-from resource.UI import AGV_GUI,Main_GUI
-import modbus_set
+from resource.UI import AGV_GUI, Main_GUI
+from modbus_set import AGVController
 
 
-class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI,modbus_set.AGVController):
+class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
     def __init__(self):
-        super().__init__()
+        super(AGV_GUI, self).__init__()
+        self.connected = 0
         self.setupUi(self)
+        self.AGV = AGVController()
+        self.ip = self.textEdit_IP.toPlainText().strip()
+        self.port = int(self.textEdit_Port.toPlainText().strip())
         self.mytimer = QTimer(self)
+        self.mytimer.start(1000)
         self.mytimer.timeout.connect(self.onTimer)
-        self.mytimer.start(100)
         self.pb_Connect.clicked.connect(self.connect_agv)
         self.pb_Sent.clicked.connect(self.sent_param)
         self.pb_Forward.clicked.connect(self.go_f)
@@ -20,72 +23,76 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI,modbus_set.AGVController):
         self.pb_Left.clicked.connect(self.go_l)
         self.pb_Right.clicked.connect(self.go_r)
         self.pb_Stop.clicked.connect(self.stop)
+
     def connect_agv(self):
-        ip = self.textEdit_IP.toPlainText()
-        port = self.textEdit_Port.toPlainText()
-        self.init(ip, port)
-        if self.connected == 1:
-            self.textEdit_Connect.setText("已连接")
+        if self.connected == 0:
+            self.ip = self.textEdit_IP.toPlainText().strip()
+            self.port = int(self.textEdit_Port.toPlainText().strip())
+            self.AGV.modbus_init(self.ip, self.port)
+            self.label.setText(str(self.AGV.AGV_battery)+"%")
+            self.textEdit_MorA.setPlainText("手动" if self.AGV.AGV_mannualorauto == 2 else "自动")
+            self.connected = 1
+            self.textEdit_Connect.setPlainText("断开连接")
+        # ip = self.textEdit_IP.toPlainText()
+        # port = int(self.textEdit_Port.toPlainText())
+        # self.AGV.modbus_init(ip, port)
+        # self.label.setText(str(self.AGV.AGV_battery))
         else:
-            self.textEdit_Connect.setText("未连接")
+            self.AGV.client.close()
+            self.connected = 0
+            self.textEdit_Connect.setPlainText("连接AGV")
+
+    def sent_param(self):
+        self.AGV.change_vx(float(self.textEdit_vX.toPlainText().strip()))
+        self.AGV.change_vy(float(self.textEdit_vY.toPlainText().strip()))
+        self.AGV.change_vw(float(self.textEdit_vW.toPlainText().strip()))
+
+    def go_f(self):
+        self.AGV.change_vx(0.1)
+        self.AGV.change_vy(0)
+        self.AGV.change_vw(0.1)
+
+    def go_b(self):
+        self.AGV.change_vx(-0.1)
+        self.AGV.change_vy(0)
+        self.AGV.change_vw(0.1)
+
+    def go_l(self):
+        self.AGV.change_vx(0)
+        self.AGV.change_vy(0.1)
+        self.AGV.change_vw(0.1)
+
+    def go_r(self):
+        self.AGV.change_vx(0)
+        self.AGV.change_vy(-0.1)
+        self.AGV.change_vw(0.1)
+
+    def stop(self):
+        self.AGV.change_vx(0)
+        self.AGV.change_vy(0)
+        self.AGV.change_vw(0)
 
     def onTimer(self):
         if self.connected == 1:
             if self.button_Heartbeat.isChecked():
-                current_value = self.client.read_holding_registers(40010, 1)[0]
+                current_value = self.AGV.client.read_holding_registers(9, 1)[0]
                 new_value = 1 if current_value != 1 else 2
-                self.client.write_single_register(40010, new_value)
-            else:
-                pass
-            self.textEdit_Connect.setText("已连接")
-            self.readonly_status()
-            self.textEdit_vX.setText(self.AGV_vx)
-            self.textEdit_vY.setText(self.AGV_vy)
-            self.textEdit_vW.setText(self.AGV_vw)
-            self.textEdit_battery.setText(self.AGV_battery)
-            self.textEdit_posX.setText(self.AGV_posx)
-            self.textEdit_posY.setText(self.AGV_posy)
-            self.textEdit_angle.setText(self.AGV_theta)
-            self.textEdit_MovingStatus.setText(self.AGV_movingstatus)
-            self.textEdit_MorA.setText("手动" if self.AGV_mannualorauto == 1 else "自动")
-            self.textEdit_ESStatus.setText("触发" if self.AGV_emergencystop == 1 else "未触发")
-        else:
-            self.textEdit_Connect.setText("未连接")
+                self.client.write_holding_register(9, new_value)
+            self.AGV.readonly_status()
+            self.textEdit_vX.setPlainText(self.AGV.AGV_vx)
+            self.textEdit_vY.setPlainText(self.AGV.AGV_vy)
+            self.textEdit_vW.setPlainText(self.AGV.AGV_vw)
+            self.label.setText(str(self.AGV.AGV_battery)+"%")
+            self.textEdit_MorA.setPlainText("手动" if self.AGV.AGV_mannualorauto == 2 else "自动")
+            self.textEdit_posX.setPlainText(self.AGV.AGV_posx)
+            self.textEdit_posY.setPlainText(self.AGV.AGV_posy)
+            self.textEdit_angle.setPlainText(self.AGV.AGV_theta)
+            self.textEdit_MovingStatus.setPlainText(self.AGV.AGV_movingstatus)
+            self.textEdit_ESStatus.setPlainText("触发" if self.AGV_emergencystop == 1 else "未触发")
 
-    def sent_param(self):
-        self.change_vx(self.textEdit_vX.toPlainText())
-        self.change_vy(self.textEdit_vY.toPlainText())
-        self.change_vw(self.textEdit_vW.toPlainText())
-
-    def go_f(self):
-        self.change_vx(0.1)
-        self.change_vy(0)
-        self.change_vw(0.1)
-
-    def go_b(self):
-        self.change_vx(-0.1)
-        self.change_vy(0)
-        self.change_vw(0.1)
-
-    def go_l(self):
-        self.change_vx(0)
-        self.change_vy(0.1)
-        self.change_vw(0.1)
-
-    def go_r(self):
-        self.change_vx(0)
-        self.change_vy(-0.1)
-        self.change_vw(0.1)
-
-    def stop(self):
-        self.change_vx(0)
-        self.change_vy(0)
-        self.change_vw(0)
-
-
-class Main_window(QMainWindow, Main_GUI.Ui_Main_GUI):
+class MainWindow(QMainWindow, Main_GUI.Ui_Main_GUI):
     def __init__(self):
-        super(Main_window, self).__init__()
+        super(MainWindow, self).__init__()
         self.agv_gui = None
         self.setupUi(self)
         self.pb_AGVGUI.clicked.connect(self.open_agv_gui)
@@ -98,6 +105,6 @@ class Main_window(QMainWindow, Main_GUI.Ui_Main_GUI):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    main = Main_window()
+    main = AGV_GUI()
     main.show()
     sys.exit(app.exec_())
