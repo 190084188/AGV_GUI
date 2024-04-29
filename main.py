@@ -29,7 +29,7 @@ class WriteThread(QThread):
                 self.write_float32(0, self.vx)
                 self.write_float32(2, self.vy)
                 self.write_float32(4, self.vw)
-                self.msleep(50)
+                self.msleep(40)
             else:
                 break
 
