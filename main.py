@@ -1,71 +1,11 @@
 import struct
 import sys
+
+from PyQt5 import QtWidgets
 from PyQt5.QtCore import QThread, pyqtSignal
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from pyModbusTCP.client import ModbusClient
 from resource.UI import AGV_GUI, Main_GUI
-
-
-class Controller(ModbusClient):
-    def __init__(self, ip, port):
-        super(Controller, self).__init__(host=ip, port=port, auto_open=False)
-        self.open()
-
-    def read_holding_float32(self, address):
-        try:
-            # 从指定地址读取两个连续的寄存器
-            registers = self.read_holding_registers(address, 2)
-            if registers is None:
-                print(f"Failed to read holding registers at address {address}")
-                return None
-            # 合并寄存器值为32位整数
-            # 适用于小端格式的设备（低地址寄存器在前）
-            # 对于大端格式的设备，调整 registers[0] 和 registers[1] 的顺序
-            raw_value = registers[0] + (registers[1] << 16)
-            # 将32位整数解码为浮点数
-            float_value = struct.unpack('f', struct.pack('I', raw_value))[0]
-            float_value = "{:.4f}".format(float_value)
-            return float_value
-        except Exception as e:
-            print(f"Error reading float from address {address}: {str(e)}")
-            return None
-
-    def read_input_float32_SE(self, address):
-        try:
-            # 从指定地址读取两个连续的寄存器
-            registers = self.read_input_registers(address, 2)
-            # 合并寄存器值为32位整数
-            # 适用于小端格式的设备（低地址寄存器在前）
-            # 对于大端格式的设备，调整 registers[0] 和 registers[1] 的顺序
-            raw_value = registers[0] + (registers[1] << 16)
-            # 将32位整数解码为浮点数
-            float_value = struct.unpack('f', struct.pack('I', raw_value))[0]
-            float_value = "{:.4f}".format(float_value)
-            return float_value
-        except Exception as e:
-            print(f"Error reading float from address {address}: {str(e)}")
-            return None
-
-    def write_float32(self, address, float_value):
-        try:
-            # 将float转换为4字节的二进制数据
-            packed_float = struct.pack('f', float_value)
-            # 将4字节数据转换为两个16位的整数
-            low, high = struct.unpack('<HH', packed_float)  # '<HH' 表示小端模式
-            # 将两个整数写入连续的寄存器
-            self.write_multiple_registers(address, [low, high])
-        except Exception as e:
-            print(f"Error writing to holding register at address {address}: {str(e)}")
-            return False
-
-    def change_vx(self, value):
-        self.write_float32(0, value)
-
-    def change_vy(self, value):
-        self.write_float32(2, value)
-
-    def change_vw(self, value):
-        self.write_float32(4, value)
 
 
 class WriteThread(QThread):
@@ -174,7 +114,9 @@ class ReadThread(QThread):
                     "posy": self.read_input_float32_SE(8),
                     "theta": self.read_input_float32_SE(10),
                     "MorA": self.controller.read_input_registers(18, 1)[0],
-                    "battery": self.controller.read_input_registers(15, 1)[0]
+                    "battery": self.controller.read_input_registers(15, 1)[0],
+                    "movingstatus": self.controller.read_discrete_inputs(8, 1)[0],
+                    'ESStatus': self.controller.read_discrete_inputs(9, 1)[0]
                 }
                 self.data_updated.emit(data)
                 self.msleep(499)
@@ -235,7 +177,7 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
         self.vy = 0
         self.vw = 0
         self.client_read = None
-        self.client_write= None
+        self.client_write = None
         ############################################################
         self.read_thread = ReadThread(self.client_read)
         self.write_thread = WriteThread(self.client_write)
@@ -278,7 +220,7 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
                     self.vw_changed.connect(self.write_thread.update_vw)
                     self.heartbeat_changed.connect(self.write_thread.toggle_heartbeat)
                     self.pb_Connect.setText("断开连接")
-                    self.textEdit_Connect.setText("连接成功")
+                    self.lineEdit_connect.setText("连接成功")
                     self.connected = True
                     self.read_thread.start()
                     self.write_thread.start()
@@ -293,21 +235,26 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
                         self.client_read.close()
                     if self.client_write:
                         self.client_write.close()
-                    self.textEdit_Connect.setText("连接失败")
+                    QMessageBox.warning(None, "错误警告", "连接失败，请检查设备或网络配置",
+                                        QMessageBox.Ok)
+                    self.lineEdit_connect.setText("连接失败")
         else:
             self.disconnect_agv()  # 分离断开连接的逻辑到单独的方法
 
     def disconnect_agv(self):
-        # 用于断开连接并清理资源
-        self.connected = False
-        self.read_thread.running = False
-        self.write_thread.running = False
-        self.read_thread.wait()
-        self.write_thread.wait()
-        self.client_read.close()
-        self.client_write.close()
-        self.pb_Connect.setText("连接AGV")
-        self.textEdit_Connect.setText("未连接")
+        if self.connected:
+            # 用于断开连接并清理资源
+            self.connected = False
+            self.read_thread.running = False
+            self.write_thread.running = False
+            self.read_thread.wait()
+            self.write_thread.wait()
+            self.client_read.close()
+            self.client_write.close()
+            self.pb_Connect.setText("连接AGV")
+            self.lineEdit_connect.setText("未连接")
+        else:
+            pass
 
     def heartbeat_state_changed(self):
         if self.button_Heartbeat.isChecked():
@@ -345,15 +292,19 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
         if data['vw'] is not None:
             self.lineEdit_vw.setText(str(data['vw']))
         if data['battery'] is not None:
-            self.label.setText(str(data['battery']) + "%")
+            self.lineEdit_Battery.setText(str(data['battery']) + "%")
         if data['MorA'] is not None:
-            self.textEdit_MorA.setPlainText("手动" if int(data['MorA']) == 2 else "自动")
+            self.lineEdit_MorA.setText("手动" if int(data['MorA']) == 2 else "自动")
         if data['posx'] is not None:
             self.lineEdit_posx.setText(data['posx'])
         if data['posy'] is not None:
             self.lineEdit_posy.setText(data['posy'])
         if data['theta'] is not None:
             self.lineEdit_angle.setText(data['theta'])
+        if data['movingstatus'] is not None:
+            self.lineEdit_MovingStatus.setText("移动遇阻" if data['movingstatus'] else "移动无阻")
+        if data['ESStatus'] is not None:
+            self.lineEdit_ESStatus.setText("急停触发" if data['ESStatus'] else "急停未触发")
 
     def go_f(self):
         if self.vx != 0:
@@ -402,6 +353,22 @@ class AGV_GUI(QMainWindow, AGV_GUI.Ui_AGV_GUI):
         self.vx_changed.emit(0)
         self.vy_changed.emit(0)
         self.vw_changed.emit(0)
+
+    def closeEvent(self, event):
+        msgBox = QtWidgets.QMessageBox(self)
+        msgBox.setWindowTitle(u'温馨提示')
+        msgBox.setText(u'确认退出?')
+        msgBox.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+        msgBox.button(QtWidgets.QMessageBox.Yes).setText('确认')
+        msgBox.button(QtWidgets.QMessageBox.No).setText('取消')
+        msgBox.setDefaultButton(QtWidgets.QMessageBox.No)
+        reply = msgBox.exec_()
+        # QtWidgets.QMessageBox.question(self,u'弹窗名',u'弹窗内容',选项1,选项2)
+        if reply == QtWidgets.QMessageBox.Yes:
+            self.disconnect_agv()
+            event.accept()  # 关闭窗口
+        else:
+            event.ignore()  # 忽视点击X事件
 
 
 class MainWindow(QMainWindow, Main_GUI.Ui_Main_GUI):
